@@ -6,6 +6,7 @@ import pdb
 import pickle
 import os
 import csv
+from tqdm import tqdm
 
 
 def detect_dentate_spikes_nokia2017(
@@ -131,7 +132,6 @@ def detect_dentate_spikes_nokia2017(
 
     df = pd.DataFrame.from_dict(evnts_dict)
 
-    
     # return traces if desired
     if return_trace:
         ts_trace_start = np.array(peaks_t) + wdnw_trace[0]
@@ -149,16 +149,13 @@ def detect_dentate_spikes_nokia2017(
             lst_t_trace.append(time[pos_start_i:pos_stop_i])
             lst_zscore.append(zscored_data[pos_start_i:pos_stop_i])
         
-        #df['trace'] = []
-        #evnts_dict['traces'] = lst_trace
-        df_trace = pd.DataFrame({'trace': [], 't_trace': [], 'trace_zscore': []})
+        df_trace = pd.DataFrame(
+            {'trace': [], 't_trace': [], 'trace_zscore': []})
         df_trace.astype(object)
         df_trace['trace'] = lst_trace
         df_trace['t_trace'] = lst_t_trace
         df_trace['trace_zscore'] = lst_zscore
-        #pdb.set_trace()
         df = df.join(df_trace)
-        #df = pd.concat([df, df_trace], keys=list(df.keys())+list(df_trace.keys()), axis=1, ignore_index=True)
     return df
 
 
@@ -202,7 +199,6 @@ def detect_dentate_spikes_zscore(
     if center:
         data -= np.mean(data)
 
-#    evts = rd.core.threshold_by_zscore(data, time, min_duration, zscore_thres)
     # from github Eden-Kramer-Lab/ripple_detection/.core threshold_by_zscore
     zscored_data = zscore(data)
     is_above_threshold = zscored_data > thres_zscore_peak
@@ -281,7 +277,6 @@ def detect_dentate_spikes_zscore(
 
     df = pd.DataFrame.from_dict(evnts_dict)
 
-    
     # return traces if desired
     if return_trace:
         ts_trace_start = np.array(peaks_t) + wdnw_trace[0]
@@ -299,17 +294,39 @@ def detect_dentate_spikes_zscore(
             lst_t_trace.append(time[pos_start_i:pos_stop_i])
             lst_zscore.append(zscored_data[pos_start_i:pos_stop_i])
         
-        #df['trace'] = []
-        #evnts_dict['traces'] = lst_trace
-        df_trace = pd.DataFrame({'trace': [], 't_trace': [], 'trace_zscore': []})
+        df_trace = pd.DataFrame(
+            {'trace': [], 't_trace': [], 'trace_zscore': []})
         df_trace.astype(object)
         df_trace['trace'] = lst_trace
         df_trace['t_trace'] = lst_t_trace
         df_trace['trace_zscore'] = lst_zscore
-        #pdb.set_trace()
         df = df.join(df_trace)
-        #df = pd.concat([df, df_trace], keys=list(df.keys())+list(df_trace.keys()), axis=1, ignore_index=True)
     return df
+
+
+def detect_dentate_spikes_dvorak2021(x, ):
+    """
+    Detect dentate spikes as in Dvorak et al., 2021, bioRxiv
+    1) Filter LFP with bandpass fiter between 5-100 Hz
+    2) Detect all local peaks
+    3) Extract features:
+        a) Amplitude difference between peak and preceding as
+           well as subsequent minimum,
+        b) spike width measured as distance to preceding or
+           subsequent minimum, whichever is closest
+        c) Z-scoring of log-transformed amplitude distribution
+    4) Accept as Dentate spike if amplitudes are >.75 to preceding
+       and following minima and if width of event is between 5 and 25 ms.
+
+    Parameters
+    ----------
+    x : ndarray, shape (n,) | list(ndarray)
+       LFP time series of length n or list of
+       ndarrays if recording not continous
+    
+    Returns
+    ----------
+    """
 
 
 def create_folder_structure(path):
@@ -317,9 +334,11 @@ def create_folder_structure(path):
         os.makedirs(path)
         print(path + ' created')
 
+
 def save_dict(di_, filename_):
     with open(filename_, 'wb') as f:
         pickle.dump(di_, f)
+
 
 def load_dict(filename_):
     with open(filename_, 'rb') as f:
@@ -355,3 +374,116 @@ def load_detect_store(
     
     except Exception as e:
         print(e)
+
+
+def load_dentatespikes_from_file(row, path):
+    """
+    Get all events stored within one file
+    
+    Params
+    ------
+    row : pandas row
+    path : str, path of file
+    
+    Returns
+    ------
+    df_ds : pandas dataframe
+    ------
+    
+    """
+    animal_id = row['id']
+    t_i = row['datetime']
+    fname = (
+        path +
+        'ds_' + str(animal_id) +
+        '_' + t_i.strftime("%Y_%m_%d_%H_%M_%S") + '.pkl')
+    df_ds = load_dict(fname)
+    return df_ds
+        
+
+def load_dentatespikes_from_df(df, path, name_trace='trace', explode=True):
+    """
+    Get all dentatespikes associated to rows in df
+    
+    Params
+    ------
+    df : pandas data frame
+    path : str, path of files
+    explode : if true, each dentatespike becomes its own row
+    onlyfulllength : if true, only data with full length is permitted
+    
+    Returns
+    ------
+    df_out : pandas data frame
+    ------
+    
+    """
+    
+    print('   extract all traces')
+    ls_trace = []
+    for i, row_i in tqdm(df.iterrows()):
+        try:
+            # get output name
+            animal_id = row_i['id']
+            t_i = row_i['datetime']
+            fname = (
+                path +
+                'ds_' + str(animal_id) +
+                '_'+t_i.strftime("%Y_%m_%d_%H_%M_%S")+'.pkl')
+            df_ds = load_dict(fname)
+            ls_trace.append(df_ds[name_trace])
+        except:
+#            pdb.set_trace()
+            ls_trace.append(np.nan)
+            print('Failed on: ')
+            print(row_i)
+    df_out = df.copy()
+    df_out[name_trace] = ls_trace
+
+    if explode:
+        df_out = df_out.explode(name_trace).fillna('')
+        df_out = df_out.reset_index(drop=True)
+    return df_out
+
+
+def ensure_entries_have_full_length(df, key, n_dp):
+    """
+    Discard entries which do not have a specific length
+
+    Params
+    ------
+    df : pandas data frame
+    key : str, name of column
+    n_dp : int, number of data points per entry
+
+    Returns
+    ------
+    df_out : pandas data frame
+    """
+    
+    df_out = df.copy()
+    bool_i = [len(i) == n_dp for i in df_out[key]]
+    df_out = df_out[bool_i]
+    df_out = df_out.reset_index(drop=True)
+
+    return df_out
+
+
+def get_random_traces(
+        data,
+        time,
+        n_dp,
+        n_evts):
+    ls_trace = []
+    ls_t_trace = []
+    for i in range(n_evts):
+        pos = np.random.choice(len(data)-n_dp)
+        ls_trace.append(data[pos:pos+n_dp])
+        ls_t_trace.append(time[pos:pos+n_dp])
+        
+    df = pd.DataFrame(
+        {'trace_random': [], 't_trace': []})
+    df['trace_random'] = ls_trace
+    df['t_trace'] = ls_t_trace
+
+    return df
