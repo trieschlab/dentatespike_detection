@@ -307,7 +307,7 @@ def detect_dentate_spikes_zscore(
 def detect_dentate_spikes_dvorak2021(x, ):
     """
     Detect dentate spikes as in Dvorak et al., 2021, bioRxiv
-    1) Filter LFP with bandpass fiter between 5-100 Hz
+    1) LFP bandpass-filter between 5-100 Hz
     2) Detect all local peaks
     3) Extract features:
         a) Amplitude difference between peak and preceding as
