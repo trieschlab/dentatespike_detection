@@ -86,7 +86,7 @@ def build_encoder_small(
     # define input layer
     encoder_inputs = layers.Input(shape=(enc_units[0],))
     x = encoder_inputs
-    for n_i in enc_units[1:-2]:
+    for n_i in enc_units[1:-1]:
         x = layers.Dense(n_i, activation=actfn)(x)
         x = layers.Dropout(drop_fc)(x)
     x = layers.Flatten()(x)
