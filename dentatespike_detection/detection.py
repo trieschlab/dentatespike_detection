@@ -487,3 +487,60 @@ def get_random_traces(
     df['t_trace'] = ls_t_trace
 
     return df
+
+
+def dist_to_neighb(x, y, check_sorted=True):
+    """
+    Find distance of positions in x to preceding and following
+    neigbors in y. If no preceding or following neighbors
+    are present, return nan.
+    
+    x:        1 - 6 - 8
+    y:        - 3 - 7 -
+    d_pre:    \ - 3 - 1
+    d_fol:    2 - 1 - \
+    
+    
+    
+    Params:
+    -------
+    x : `ndarray`,
+        positions for which distance to neighbors is to be detected
+    y : `ndarray`,
+        positions of neighbors
+    check_sorted : bool, optional,
+        verify that input is sorted and do so if it is not sorted
+    
+        
+    Returns:
+    --------
+    d_pre : `ndarray`,
+        distances to preceding neighbors for each position in x
+    d_fol : `ndarray`,
+        distances to following neighbors for each position in x
+    
+    """
+
+    # check if input is sorted
+    if check_sorted:
+        ls = [x, y]
+        for i in range(2):
+            v = ls[i]
+            bool_srtd = np.all(v[:-1] <= v[1:])
+        if not bool_srtd:
+            ls[i] = np.sort(v)
+        x = ls[0]
+        y = ls[1]
+        
+    # add -np.inf before and np.inf after to indicate those values without a valid neighbor
+    y = np.concatenate([[-np.inf], y, [np.inf]])
+    
+    # find preceding and following neighbors
+    srtd = np.searchsorted(y, x)
+
+    val_pre = y[srtd-1]
+    val_post = y[srtd]
+    
+    dist = [val_pre - x, val_post - x]
+
+    return dist
