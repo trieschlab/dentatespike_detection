@@ -23,8 +23,9 @@ def detect_dentate_spikes_nokia2017(
     return_trace=False,
     wdnw_trace=[-0.1, 0.1],
 ):
-    
     """
+    Dentate spike detection similar to Nokia et al. 2017.
+
     Params
     ------
     data : array_like, shape (n_time,),
@@ -374,6 +375,43 @@ def load_detect_store(
     
     except Exception as e:
         print(e)
+
+def detect_dentate_spikes_dvorak2021(
+    data,
+    time,
+    thres_dur,
+    thres_zscore,
+    thres_peak,
+    thres_rise,
+    wndw_rise,
+    polarity=1,
+    center=True,
+    return_only_valid=True,
+    return_trace=False,
+    wdnw_trace=[-0.1, 0.1],
+):
+    """
+    Dentate spike detection as in Dvorak et al. 2021
+    
+    1) Band pass filtering at 5-100 Hz
+    2) Z-score signal amplitude
+    3) Detection of local peak
+    
+    Params
+    ------
+    data : array_like, shape (n_time,),
+    time : array_like, shape (n_time,),
+    wndw_rise : array_like, shape (2,), start and end of preceding window in s,
+    polarity : signed int, 1 or -1, wether ds are positive or negative
+               deflections,
+    center : bool, wheter or not mean is subtracted,
+    return_trace : bool, wether LFP trace is returned,
+    wdnw_trace : array_like, shape (2,), start and end of trace in s,
+    
+    Returns
+    -------
+    df : pd.DataFrame, results
+    """
 
 
 def load_dentatespikes_from_file(row, path):
