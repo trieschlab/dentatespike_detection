@@ -1,4 +1,5 @@
 from scipy.stats import zscore
+from scipy.signal import argrelextrema
 import pandas as pd
 import ripple_detection as rd
 import numpy as np
@@ -7,6 +8,155 @@ import pickle
 import os
 import csv
 from tqdm import tqdm
+
+def _return_traces(data, pos, wndw_trace):
+    pass
+
+def _determine_sampling_interval(time, precision):
+    sampling_interval = np.round(np.mean(np.diff(time)), precision)
+    return sampling_interval
+    
+def detect_peaks_argrelextrema_with_info(
+    data,
+    time,
+    width_peak_wndw=0.01,
+    wndw_preceding=[-0.02, -0.01],
+    rise_offset=100,
+    return_trace=False,
+    wdnw_trace=[-0.1, 0.1],
+)
+    """ 
+    Wrapper function around detect_peaks_argrelextrema to have
+    SI units as parameters, obtain additional info and return a dataframe.
+    
+    Parameters
+    ----------
+    data : ndarray
+        Array in which to find the relative extrema.
+    time : ndarray
+        Array with timepoints for each datapoint
+    width_peak_wndw : float, optional
+        width in seconds, corresponds to order parameter in detect_peaks_argrelextrema
+    wndw_preceding : ndarray, optional
+        timewindow in seconds, corresponds to wndw parameter in detect_peaks_argrelextrema
+    rise_offset : float, optional
+        determine how much peak must exceed max value in wndw_preceding
+    return_trace : bool, optional
+        whether data trace surrounding the peak is returned
+    wdnw_trace : ndarray, optional
+        time window in seconds, defines size of returned trace
+         
+    Returns
+    -------
+    df : Pandas DataFrame
+        With infos about each peak
+    """
+    
+    # determine sampling rate
+    sampling_interval = _determine_sampling_interval(time[:100])
+    
+    # convert width_peak_wndw to bins
+    width_peak_wndw_bins = int(np.round(width_peak_wndw/sampling_interval))
+    
+    # convert wndw_preceding to bins
+    wndw_preceding_bins = [
+        int(np.round(i/sampling_interval)) for i in wndw_preceding]
+
+    # detect peaks
+    peaks = detect_peaks_argrelextrema(
+        data, width_peak_wndw_bins, wndw_preceding_bins, rise_offset)
+    
+    # determine peak time points and amplitudes
+    peaks_t = time[peaks]
+    peaks_amp = data[peaks]
+    
+    evnts_dict = {
+    'peaks_amp': peaks_amp,
+    'peaks_t': peaks_t,
+    }
+
+    df = pd.DataFrame.from_dict(evnts_dict)
+
+    # return traces if desired
+    if return_trace:
+        
+        # convert wndw_preceding to bins
+        wdnw_trace_bins = [
+            int(np.round(i/sampling_interval)) for i in wdnw_trace]
+        
+        # create empty array to store data of traces
+        ar_data_trace = np.empty((len(peaks, wdnw_trace[1]-wdnw_trace[0])))
+        ar_t_trace = np.empty((len(peaks, wdnw_trace[1]-wdnw_trace[0])))
+        for i, shift_i in enumerate(
+            range(wdnw_trace[0], wdnw_trace[1])):
+            ar_data_trace[:, i] = data.take(
+                peaks-shift_i, axis=0, mode='clip')
+            ar_t_trace[:, i] = time.take(
+                peaks-shift_i, axis=0, mode='clip')            
+            
+        ls_data_trace = list(ar_data_trace)
+        ls_t_trace = list(ar_t_trace)
+            
+        df_trace = pd.DataFrame(
+            {'trace': [], 't_trace': []})
+        df_trace.astype(object)
+        df_trace['trace'] = ls_data_trace
+        df_trace['t_trace'] = ls_t_trace
+        df = df.join(df_trace)
+    return df
+
+    
+def detect_peaks_argrelextrema(
+    data,
+    order=10,
+    wndw=[-10, -5],
+    rise_offset=100
+    ):
+    """
+    detect_peaks uses a two step process to find sharp transitions
+    in one dimensional time series data. 
+     1) Candidate peaks are identified using the argrelextrema of 
+        scipy.signal with the order parameter
+     2) The value of each candidate peak must exceed the maximum plus a 
+        rise_offset for any value in a given timewindow.
+        
+    Parameters
+    ----------
+    data : ndarray
+        Array in which to find the relative extrema.
+    order : int, optional
+        order of scipy.signal.argrelextrema
+    wndw : ndarray, optional
+         list or array of length 2. Defines window in which each value is
+         compared to peak
+    rise_offset : float, optional
+         Offset added to values in window.
+         
+    Returns
+    -------
+    locs : ndarray
+        Location of peaks
+    
+    """
+    # define params for take functions in both steps
+    axis = 0
+    mode = 'clip'
+    
+    # find candidate extrema
+    locs = argrelextrema(
+        dat, np.greater, order=order, axis=axis, mode=mode)[0]
+    
+    # ensure sharp onset. keep only if peak exceeds maxima in preceding window.
+    results = np.ones(len(locs), dtype=bool)
+    main = data.take(locs, axis=axis, mode=mode)
+    for shift in range(wndw_prec[0], wndw_prec[1]):
+        minus = data.take(locs + shift, axis=axis, mode=mode)
+        minus = minus + rise_offset
+        results &= np.greater(main, minus)
+        if(~results.any()):
+            break
+    locs = locs[np.nonzero(results)]
+    return locs
 
 
 def detect_dentate_spikes_nokia2017(
@@ -137,6 +287,8 @@ def detect_dentate_spikes_nokia2017(
     if return_trace:
         ts_trace_start = np.array(peaks_t) + wdnw_trace[0]
         ts_trace_stop = np.array(peaks_t) + wdnw_trace[1]
+        print('Warning: searchsorted on concatenated start and stops can'+
+              'create problems with overlapping windows.')
         ts_trace_both = np.sort(
             np.concatenate((ts_trace_start, ts_trace_stop)))
         pos_trace = np.searchsorted(time, ts_trace_both)
@@ -207,6 +359,21 @@ def detect_dentate_spikes_zscore(
     
     evts = rd.core.segment_boolean_series(
         is_above_threshold, minimum_duration=thres_dur)
+    
+    # create empty dataframe for all cases in which no
+    # spikes are detected
+    evnts_dict = {
+        'peaks_amp': [],
+        'peaks_zscore': [],
+        'peaks_t': [],
+        'peaks_zscore_wndw_bfr': [],
+        't_peaks_zscore_wndw_bfr': [],
+    }
+    df = pd.DataFrame.from_dict(evnts_dict)
+    
+    # interrupt if there are no events detected
+    if len(evts)==0:
+        return df
 
     # determine position of start and stop times in data
     tps = np.array(evts).flatten()
@@ -219,7 +386,10 @@ def detect_dentate_spikes_zscore(
     peaks_t = []
     for pos_start, pos_stop in pos_tps:
         data_i = data[pos_start:pos_stop]
-        peak_pos_i = np.argmax(data_i)
+        try:
+            peak_pos_i = np.argmax(data_i)
+        except:
+            pdb.set_trace()
         peak_t_i = time[pos_start+peak_pos_i]
         peak_i = data[pos_start+peak_pos_i]
         peak_zscore_i = zscored_data[pos_start+peak_pos_i]
@@ -238,20 +408,23 @@ def detect_dentate_spikes_zscore(
     # get maximum value in time window before the spike
     ts_wndw_start = peaks_t+wndw_rise[0]
     ts_wndw_stop = peaks_t+wndw_rise[1]
-    ts_wndw_both = np.sort(np.concatenate((ts_wndw_start, ts_wndw_stop)))
-    pos_tps_rise = np.searchsorted(time, ts_wndw_both)
-    pos_tps_rise = list(zip(pos_tps_rise[::2], pos_tps_rise[1::2]))
+    pos_wndw_start = np.searchsorted(time, ts_wndw_start)
+    pos_wndw_stop = np.searchsorted(time, ts_wndw_stop)
+    pos_tps_rise = list(zip(pos_wndw_start, pos_wndw_stop))
 
     peaks_zscore_wndw_bfr = []
     t_peak_wndw_bfr = []
     
     for i in range(len(peaks_amp)):
-        pos_start = pos_tps_rise[i][0]
-        pos_stop = pos_tps_rise[i][1]
-        data_i = zscored_data[pos_start:pos_stop]
-        peak_pos_i = np.argmax(data_i)
-        peak_i = data_i[peak_pos_i]
-        peak_t_i = time[pos_start+peak_pos_i]
+        try:
+            pos_start = pos_tps_rise[i][0]
+            pos_stop = pos_tps_rise[i][1]
+            data_i = zscored_data[pos_start:pos_stop]
+            peak_pos_i = np.argmax(data_i)
+            peak_i = data_i[peak_pos_i]
+            peak_t_i = time[pos_start+peak_pos_i]
+        except:
+            pdb.set_trace()
         
         peaks_zscore_wndw_bfr.append(peak_i)
         t_peak_wndw_bfr.append(peak_t_i)
