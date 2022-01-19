@@ -29,3 +29,20 @@ def test_dist_to_neighb():
     
     assert np.array_equal(dist_pre, d_pre)
     assert np.array_equal(dist_fol, d_fol)
+
+
+def test_detect_peaks_argrelextrema():
+    data = np.array([2,0,0,0,5,0,0,6])
+    targ = np.array([0,0,0,0,5,0,0,0])
+    
+    peaks = dect.detect_peaks_argrelextrema(
+        data,
+        order=2,
+        wndw=[-3, -1],
+        rise_offset=4)
+    
+    ar_test = np.zeros(len(data))
+    ar_test[peaks] = data[peaks]
+    
+    assert np.array_equal(ar_test, targ)
+        

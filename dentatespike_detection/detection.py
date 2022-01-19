@@ -9,13 +9,12 @@ import os
 import csv
 from tqdm import tqdm
 
-def _return_traces(data, pos, wndw_trace):
-    pass
 
 def _determine_sampling_interval(time, precision):
-    sampling_interval = np.round(np.mean(np.diff(time)), precision)
+    sampling_interval = np.median(np.diff(time))
     return sampling_interval
-    
+
+
 def detect_peaks_argrelextrema_with_info(
     data,
     time,
@@ -23,8 +22,7 @@ def detect_peaks_argrelextrema_with_info(
     wndw_preceding=[-0.02, -0.01],
     rise_offset=100,
     return_trace=False,
-    wdnw_trace=[-0.1, 0.1],
-)
+    wdnw_trace=[-0.1, 0.1]):
     """ 
     Wrapper function around detect_peaks_argrelextrema to have
     SI units as parameters, obtain additional info and return a dataframe.
@@ -41,6 +39,7 @@ def detect_peaks_argrelextrema_with_info(
         timewindow in seconds, corresponds to wndw parameter in detect_peaks_argrelextrema
     rise_offset : float, optional
         determine how much peak must exceed max value in wndw_preceding
+        same unit as data
     return_trace : bool, optional
         whether data trace surrounding the peak is returned
     wdnw_trace : ndarray, optional
@@ -53,7 +52,7 @@ def detect_peaks_argrelextrema_with_info(
     """
     
     # determine sampling rate
-    sampling_interval = _determine_sampling_interval(time[:100])
+    sampling_interval = _determine_sampling_interval(time[:100], precision=10)
     
     # convert width_peak_wndw to bins
     width_peak_wndw_bins = int(np.round(width_peak_wndw/sampling_interval))
@@ -71,8 +70,9 @@ def detect_peaks_argrelextrema_with_info(
     peaks_amp = data[peaks]
     
     evnts_dict = {
-    'peaks_amp': peaks_amp,
-    'peaks_t': peaks_t,
+        'peaks_loc': peaks,
+        'peaks_amp': peaks_amp,
+        'peaks_t': peaks_t,
     }
 
     df = pd.DataFrame.from_dict(evnts_dict)
@@ -85,10 +85,10 @@ def detect_peaks_argrelextrema_with_info(
             int(np.round(i/sampling_interval)) for i in wdnw_trace]
         
         # create empty array to store data of traces
-        ar_data_trace = np.empty((len(peaks, wdnw_trace[1]-wdnw_trace[0])))
-        ar_t_trace = np.empty((len(peaks, wdnw_trace[1]-wdnw_trace[0])))
+        ar_data_trace = np.empty((len(peaks), wdnw_trace_bins[1]-wdnw_trace_bins[0]))
+        ar_t_trace = np.empty((len(peaks), wdnw_trace_bins[1]-wdnw_trace_bins[0]))
         for i, shift_i in enumerate(
-            range(wdnw_trace[0], wdnw_trace[1])):
+            range(wdnw_trace_bins[0], wdnw_trace_bins[1])):
             ar_data_trace[:, i] = data.take(
                 peaks-shift_i, axis=0, mode='clip')
             ar_t_trace[:, i] = time.take(
@@ -103,6 +103,7 @@ def detect_peaks_argrelextrema_with_info(
         df_trace['trace'] = ls_data_trace
         df_trace['t_trace'] = ls_t_trace
         df = df.join(df_trace)
+    
     return df
 
     
@@ -144,12 +145,12 @@ def detect_peaks_argrelextrema(
     
     # find candidate extrema
     locs = argrelextrema(
-        dat, np.greater, order=order, axis=axis, mode=mode)[0]
+        data, np.greater, order=order, axis=axis, mode=mode)[0]
     
     # ensure sharp onset. keep only if peak exceeds maxima in preceding window.
     results = np.ones(len(locs), dtype=bool)
     main = data.take(locs, axis=axis, mode=mode)
-    for shift in range(wndw_prec[0], wndw_prec[1]):
+    for shift in range(wndw[0], wndw[1]):
         minus = data.take(locs + shift, axis=axis, mode=mode)
         minus = minus + rise_offset
         results &= np.greater(main, minus)
@@ -478,31 +479,6 @@ def detect_dentate_spikes_zscore(
     return df
 
 
-def detect_dentate_spikes_dvorak2021(x, ):
-    """
-    Detect dentate spikes as in Dvorak et al., 2021, bioRxiv
-    1) LFP bandpass-filter between 5-100 Hz
-    2) Detect all local peaks
-    3) Extract features:
-        a) Amplitude difference between peak and preceding as
-           well as subsequent minimum,
-        b) spike width measured as distance to preceding or
-           subsequent minimum, whichever is closest
-        c) Z-scoring of log-transformed amplitude distribution
-    4) Accept as Dentate spike if amplitudes are >.75 to preceding
-       and following minima and if width of event is between 5 and 25 ms.
-
-    Parameters
-    ----------
-    x : ndarray, shape (n,) | list(ndarray)
-       LFP time series of length n or list of
-       ndarrays if recording not continous
-    
-    Returns
-    ----------
-    """
-
-
 def create_folder_structure(path):
     if not os.path.exists(path):
         os.makedirs(path)
@@ -548,43 +524,6 @@ def load_detect_store(
     
     except Exception as e:
         print(e)
-
-def detect_dentate_spikes_dvorak2021(
-    data,
-    time,
-    thres_dur,
-    thres_zscore,
-    thres_peak,
-    thres_rise,
-    wndw_rise,
-    polarity=1,
-    center=True,
-    return_only_valid=True,
-    return_trace=False,
-    wdnw_trace=[-0.1, 0.1],
-):
-    """
-    Dentate spike detection as in Dvorak et al. 2021
-    
-    1) Band pass filtering at 5-100 Hz
-    2) Z-score signal amplitude
-    3) Detection of local peak
-    
-    Params
-    ------
-    data : array_like, shape (n_time,),
-    time : array_like, shape (n_time,),
-    wndw_rise : array_like, shape (2,), start and end of preceding window in s,
-    polarity : signed int, 1 or -1, wether ds are positive or negative
-               deflections,
-    center : bool, wheter or not mean is subtracted,
-    return_trace : bool, wether LFP trace is returned,
-    wdnw_trace : array_like, shape (2,), start and end of trace in s,
-    
-    Returns
-    -------
-    df : pd.DataFrame, results
-    """
 
 
 def load_dentatespikes_from_file(row, path):
