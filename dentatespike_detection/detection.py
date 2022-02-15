@@ -8,7 +8,7 @@ import pickle
 import os
 import csv
 from tqdm import tqdm
-
+import warnings
 
 def _determine_sampling_interval(time, precision):
     sampling_interval = np.median(np.diff(time))
@@ -29,7 +29,7 @@ def detect_peaks_argrelextrema_with_info(
     
     Parameters
     ----------
-    data : ndarray
+    data : 1d, ndarray
         Array in which to find the relative extrema.
     time : ndarray
         Array with timepoints for each datapoint
@@ -51,16 +51,23 @@ def detect_peaks_argrelextrema_with_info(
         With infos about each peak
     """
     
+    # make sure data is 1d
+    assert len(data.shape)==1
+    
     # determine sampling rate
     sampling_interval = _determine_sampling_interval(time[:100], precision=10)
     
     # convert width_peak_wndw to bins
     width_peak_wndw_bins = int(np.round(width_peak_wndw/sampling_interval))
+    assert width_peak_wndw_bins>0
     
-    # convert wndw_preceding to bins
-    wndw_preceding_bins = [
-        int(np.round(i/sampling_interval)) for i in wndw_preceding]
-
+    if wndw_preceding:
+        # convert wndw_preceding to bins
+        wndw_preceding_bins = [
+            int(np.round(i/sampling_interval)) for i in wndw_preceding]
+    else:
+        wndw_preceding_bins = None
+        
     # detect peaks
     peaks = detect_peaks_argrelextrema(
         data, width_peak_wndw_bins, wndw_preceding_bins, rise_offset)
@@ -90,10 +97,9 @@ def detect_peaks_argrelextrema_with_info(
         for i, shift_i in enumerate(
             range(wdnw_trace_bins[0], wdnw_trace_bins[1])):
             ar_data_trace[:, i] = data.take(
-                peaks-shift_i, axis=0, mode='clip')
+                peaks+shift_i, axis=0, mode='clip')
             ar_t_trace[:, i] = time.take(
-                peaks-shift_i, axis=0, mode='clip')            
-            
+                peaks+shift_i, axis=0, mode='clip')            
         ls_data_trace = list(ar_data_trace)
         ls_t_trace = list(ar_t_trace)
             
@@ -117,9 +123,13 @@ def detect_peaks_argrelextrema(
     detect_peaks uses a two step process to find sharp transitions
     in one dimensional time series data. 
      1) Candidate peaks are identified using the argrelextrema of 
-        scipy.signal with the order parameter
+        scipy.signal with the order parameter.
+        This functions detects relative extrema in 1D data which
+        exceed their n neighbours on each sides. n is determined by the
+        order parameter. 
      2) The value of each candidate peak must exceed the maximum plus a 
-        rise_offset for any value in a given timewindow.
+        rise_offset for any value in a given timewindow before its occurence.
+        This ought to ensure sharp onset. 
         
     Parameters
     ----------
@@ -147,16 +157,17 @@ def detect_peaks_argrelextrema(
     locs = argrelextrema(
         data, np.greater, order=order, axis=axis, mode=mode)[0]
     
-    # ensure sharp onset. keep only if peak exceeds maxima in preceding window.
-    results = np.ones(len(locs), dtype=bool)
-    main = data.take(locs, axis=axis, mode=mode)
-    for shift in range(wndw[0], wndw[1]):
-        minus = data.take(locs + shift, axis=axis, mode=mode)
-        minus = minus + rise_offset
-        results &= np.greater(main, minus)
-        if(~results.any()):
-            break
-    locs = locs[np.nonzero(results)]
+    if wndw and rise_offset:
+        # keep only if peak exceeds maxima in preceding window.
+        results = np.ones(len(locs), dtype=bool)
+        main = data.take(locs, axis=axis, mode=mode)
+        for shift in range(wndw[0], wndw[1]):
+            minus = data.take(locs + shift, axis=axis, mode=mode)
+            minus = minus + rise_offset
+            results &= np.greater(main, minus)
+            if(~results.any()):
+                break
+        locs = locs[np.nonzero(results)]
     return locs
 
 
